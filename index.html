@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hangman</title>
+<style>
+  :root {
+    --bg: #eef2f0;
+    --ink: #1d2b2a;
+    --muted: #5d6f6d;
+    --panel: #ffffff;
+    --line: #c9d4d1;
+    --accent: #0f766e;
+    --bad: #b42318;
+    --good: #15803d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12201f;
+      --ink: #e6efed;
+      --muted: #8fa6a3;
+      --panel: #1a2d2c;
+      --line: #2f4745;
+      --accent: #2dd4bf;
+      --bad: #f87171;
+      --good: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: Georgia, "Times New Roman", serif;
+  }
+  main {
+    width: 100%;
+    max-width: 640px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 24px;
+  }
+  h1 { margin: 0 0 4px; font-size: 1.8rem; }
+  .sub { margin: 0 0 16px; color: var(--muted); }
+  .top { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+  svg { width: 180px; height: 210px; flex: none; }
+  svg .gallows { stroke: var(--muted); stroke-width: 4; fill: none; stroke-linecap: round; }
+  svg .part { stroke: var(--ink); stroke-width: 4; fill: none; stroke-linecap: round; display: none; }
+  svg .part.show { display: block; }
+  .info { flex: 1; min-width: 200px; }
+  .hint { color: var(--muted); margin: 0 0 8px; }
+  .lives { margin: 0 0 8px; }
+  .wrong { min-height: 1.6em; color: var(--bad); letter-spacing: .15em; margin: 0; }
+  .word {
+    display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+    margin: 24px 0;
+  }
+  .slot {
+    width: 36px; height: 48px;
+    border-bottom: 3px solid var(--ink);
+    text-align: center; font-size: 2rem; line-height: 48px;
+    text-transform: uppercase;
+  }
+  .slot.lost { color: var(--bad); }
+  .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(40px, 1fr)); gap: 6px; }
+  .keys button {
+    font: inherit; font-size: 1.1rem; text-transform: uppercase;
+    padding: 10px 0; cursor: pointer;
+    background: var(--bg); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  .keys button:hover:not(:disabled) { border-color: var(--accent); }
+  .keys button:focus-visible, .again:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .keys button.hit { background: var(--good); color: #fff; border-color: var(--good); }
+  .keys button.miss { background: var(--bad); color: #fff; border-color: var(--bad); opacity: .6; }
+  .keys button:disabled { cursor: default; }
+  .status { min-height: 1.8em; margin: 20px 0 8px; font-size: 1.2rem; text-align: center; }
+  .again {
+    display: block; margin: 0 auto; font: inherit;
+    padding: 10px 22px; cursor: pointer;
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Hangman</h1>
+  <p class="sub">Guess the word before the drawing is finished. Type on your keyboard or tap the letters.</p>
+
+  <div class="top">
+    <svg viewBox="0 0 180 210" aria-label="Hangman drawing">
+      <path class="gallows" d="M20 200 H110 M50 200 V15 H130 V40"/>
+      <circle class="part" cx="130" cy="58" r="18"/>
+      <path class="part" d="M130 76 V130"/>
+      <path class="part" d="M130 88 L106 112"/>
+      <path class="part" d="M130 88 L154 112"/>
+      <path class="part" d="M130 130 L108 168"/>
+      <path class="part" d="M130 130 L152 168"/>
+    </svg>
+    <div class="info">
+      <p class="hint" id="hint"></p>
+      <p class="lives" id="lives"></p>
+      <p class="wrong" id="wrong" aria-live="polite"></p>
+    </div>
+  </div>
+
+  <div class="word" id="word" aria-live="polite"></div>
+  <div class="keys" id="keys"></div>
+  <p class="status" id="status" role="status"></p>
+  <button class="again" id="again" hidden>Play again</button>
+</main>
+
+<script>
+  // Add or change words here. Each entry is [word, hint].
+  const WORDS = [
+    ["python", "A programming language named after a comedy group"],
+    ["javascript", "Runs in every web browser"],
+    ["github", "Where developers host their code"],
+    ["variable", "A named place to store a value"],
+    ["function", "A reusable block of code"],
+    ["database", "Organised storage for data"],
+    ["algorithm", "Step-by-step instructions to solve a problem"],
+    ["keyboard", "You are probably using one right now"],
+    ["browser", "Chrome, Firefox and Safari are examples"],
+    ["network", "Connects computers together"],
+    ["server", "Answers requests from clients"],
+    ["compiler", "Turns source code into a program"]
+  ];
+  const MAX_WRONG = 6;
+  const PARTS = document.querySelectorAll(".part");
+
+  const els = {
+    word: document.getElementById("word"),
+    keys: document.getElementById("keys"),
+    hint: document.getElementById("hint"),
+    lives: document.getElementById("lives"),
+    wrong: document.getElementById("wrong"),
+    status: document.getElementById("status"),
+    again: document.getElementById("again")
+  };
+
+  let answer, hint, guessed, wrongLetters, over, lastIndex = -1;
+
+  function newGame() {
+    let i;
+    do { i = Math.floor(Math.random() * WORDS.length); } while (i === lastIndex && WORDS.length > 1);
+    lastIndex = i;
+    [answer, hint] = WORDS[i];
+    guessed = new Set();
+    wrongLetters = [];
+    over = false;
+
+    els.hint.textContent = "Hint: " + hint;
+    els.status.textContent = "";
+    els.status.style.color = "";
+    els.again.hidden = true;
+
+    els.keys.innerHTML = "";
+    for (const ch of "abcdefghijklmnopqrstuvwxyz") {
+      const b = document.createElement("button");
+      b.textContent = ch;
+      b.dataset.letter = ch;
+      b.addEventListener("click", () => guess(ch));
+      els.keys.appendChild(b);
+    }
+    render();
+  }
+
+  function guess(letter) {
+    if (over || guessed.has(letter)) return;
+    guessed.add(letter);
+    const btn = els.keys.querySelector(`[data-letter="${letter}"]`);
+    btn.disabled = true;
+
+    if (answer.includes(letter)) {
+      btn.classList.add("hit");
+    } else {
+      btn.classList.add("miss");
+      wrongLetters.push(letter);
+    }
+
+    const won = [...answer].every(c => guessed.has(c));
+    const lost = wrongLetters.length >= MAX_WRONG;
+    if (won || lost) endGame(won);
+    render();
+  }
+
+  function endGame(won) {
+    over = true;
+    els.keys.querySelectorAll("button").forEach(b => (b.disabled = true));
+    els.status.textContent = won
+      ? "You won! The word is " + answer + "."
+      : "Game over. The word was " + answer + ".";
+    els.status.style.color = won ? "var(--good)" : "var(--bad)";
+    els.again.hidden = false;
+    els.again.focus();
+  }
+
+  function render() {
+    els.word.innerHTML = "";
+    for (const c of answer) {
+      const s = document.createElement("span");
+      s.className = "slot";
+      if (guessed.has(c)) {
+        s.textContent = c;
+      } else if (over) {
+        s.textContent = c;
+        s.classList.add("lost");
+      }
+      els.word.appendChild(s);
+    }
+    PARTS.forEach((p, i) => p.classList.toggle("show", i < wrongLetters.length));
+    els.lives.textContent = "Wrong guesses left: " + (MAX_WRONG - wrongLetters.length);
+    els.wrong.textContent = wrongLetters.length ? "Missed: " + wrongLetters.join(" ").toUpperCase() : "";
+  }
+
+  document.addEventListener("keydown", e => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (/^[a-z]$/i.test(e.key)) guess(e.key.toLowerCase());
+  });
+  els.again.addEventListener("click", newGame);
+
+  newGame();
+</script>
+</body>
+</html>
